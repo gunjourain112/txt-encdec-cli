@@ -210,7 +210,7 @@ func redrawPasswordLine(prompt string, password []byte) {
 	fmt.Print(prompt)
 
 	if capsOn {
-		fmt.Print(" [CAPS] ")
+		fmt.Print(" \033[31m[CAPS]\033[0m ")
 	} else {
 		fmt.Print(" ")
 	}
@@ -243,8 +243,9 @@ func main() {
 	}
 
 	if isCapsLockOn() {
-		fmt.Println("WARNING: CAPS LOCK is ON")
+		fmt.Println("\033[31mWARNING: CAPS LOCK is ON\033[0m")
 	}
+
 	secretKey, err := readPasswordWithStars("Enter Secret Key: ")
 	if err != nil {
 		fmt.Printf("Error reading secret key: %v\n", err)
