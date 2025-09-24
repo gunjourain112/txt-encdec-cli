@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,6 +19,8 @@ import (
 
 	"golang.org/x/term"
 )
+
+var originalTerminalState *term.State
 
 func deriveKey(secret string) []byte {
 	h := sha256.Sum256([]byte(secret))
@@ -111,14 +114,48 @@ func isCapsLockOn() bool {
 	return strings.TrimSpace(string(content)) == "1"
 }
 
+// 터미널 상태 복원
+func restoreTerminal() {
+	if originalTerminalState != nil {
+		term.Restore(int(syscall.Stdin), originalTerminalState)
+		originalTerminalState = nil
+	}
+}
+
+// 시그널 핸들러
+func setupSignalHandler() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-c
+		fmt.Println("\nProgram interrupted. Restoring terminal...")
+		restoreTerminal()
+		os.Exit(0)
+	}()
+}
+
 func readPasswordWithStars(prompt string) (string, error) {
 	fmt.Print(prompt)
 
-	oldState, err := term.MakeRaw(int(syscall.Stdin))
+	// 원본 터미널 상태 저장
+	var err error
+	originalTerminalState, err = term.GetState(int(syscall.Stdin))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get terminal state: %v", err)
 	}
-	defer term.Restore(int(syscall.Stdin), oldState)
+
+	setupSignalHandler()
+
+	// Raw 모드로 전환
+	rawState, err := term.MakeRaw(int(syscall.Stdin))
+	if err != nil {
+		return "", fmt.Errorf("failed to make terminal raw: %v", err)
+	}
+
+	defer func() {
+		term.Restore(int(syscall.Stdin), rawState)
+		restoreTerminal()
+	}()
 
 	var password []byte
 	var b [1]byte
@@ -126,7 +163,7 @@ func readPasswordWithStars(prompt string) (string, error) {
 	for {
 		n, err := os.Stdin.Read(b[:])
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("failed to read input: %v", err)
 		}
 		if n == 0 {
 			continue
@@ -150,8 +187,9 @@ func readPasswordWithStars(prompt string) (string, error) {
 
 		// Ctrl+C (3)
 		if char == 3 {
-			fmt.Println()
-			os.Exit(1)
+			fmt.Println("\nProgram interrupted. Restoring terminal...")
+			restoreTerminal()
+			os.Exit(0)
 		}
 
 		// 일반
@@ -183,6 +221,8 @@ func redrawPasswordLine(prompt string, password []byte) {
 }
 
 func main() {
+	defer restoreTerminal()
+
 	scanner := bufio.NewScanner(os.Stdin)
 
 	fmt.Println("=== Text Encryption Tool ===")
@@ -205,10 +245,9 @@ func main() {
 	if isCapsLockOn() {
 		fmt.Println("WARNING: CAPS LOCK is ON")
 	}
-
 	secretKey, err := readPasswordWithStars("Enter Secret Key: ")
 	if err != nil {
-		fmt.Println("Error reading secret key")
+		fmt.Printf("Error reading secret key: %v\n", err)
 		os.Exit(1)
 	}
 
