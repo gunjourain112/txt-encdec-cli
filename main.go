@@ -114,6 +114,11 @@ func isCapsLockOn() bool {
 	return strings.TrimSpace(string(content)) == "1"
 }
 
+// 한글 체크 (last word)
+func isKoreanInputMode(lastChar byte) bool {
+	return lastChar >= 0x80 // UTF-8
+}
+
 // 터미널 상태 복원
 func restoreTerminal() {
 	if originalTerminalState != nil {
@@ -159,6 +164,7 @@ func readPasswordWithStars(prompt string) (string, error) {
 
 	var password []byte
 	var b [1]byte
+	var lastInputChar byte = 0 // 마지막 입력 문자 추적
 
 	for {
 		n, err := os.Stdin.Read(b[:])
@@ -180,7 +186,8 @@ func readPasswordWithStars(prompt string) (string, error) {
 		if char == 127 || char == 8 {
 			if len(password) > 0 {
 				password = password[:len(password)-1]
-				redrawPasswordLine(prompt, password) // 라인 다시 그림
+				lastInputChar = 0                                           // 마지막 문자 초기화
+				redrawPasswordLineWithMode(prompt, password, lastInputChar) // 라인 다시 그림
 			}
 			continue
 		}
@@ -195,7 +202,12 @@ func readPasswordWithStars(prompt string) (string, error) {
 		// 일반
 		if char >= 32 && char <= 126 {
 			password = append(password, char)
-			redrawPasswordLine(prompt, password) // 라인 다시 그림
+			lastInputChar = char
+			redrawPasswordLineWithMode(prompt, password, lastInputChar) // 라인 다시 그림
+		} else if char >= 0x80 {
+			password = append(password, char)
+			lastInputChar = char
+			redrawPasswordLineWithMode(prompt, password, lastInputChar) // 라인 다시 그림
 		}
 	}
 
@@ -203,14 +215,23 @@ func readPasswordWithStars(prompt string) (string, error) {
 	return string(password), nil
 }
 
-func redrawPasswordLine(prompt string, password []byte) {
+func redrawPasswordLineWithMode(prompt string, password []byte, lastChar byte) {
 	capsOn := isCapsLockOn()
+	koreanOn := isKoreanInputMode(lastChar)
 
 	fmt.Print("\r\033[K")
 	fmt.Print(prompt)
 
+	var statusParts []string
+	if koreanOn {
+		statusParts = append(statusParts, "\033[31m[한글]\033[0m")
+	}
 	if capsOn {
-		fmt.Print(" \033[31m[CAPS]\033[0m ")
+		statusParts = append(statusParts, "\033[31m[CAPS]\033[0m")
+	}
+
+	if len(statusParts) > 0 {
+		fmt.Print(" " + strings.Join(statusParts, " ") + " ")
 	} else {
 		fmt.Print(" ")
 	}
