@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
@@ -66,15 +67,35 @@ func decrypt(secret, encoded string) (string, error) {
 	return string(plaintext), nil
 }
 
-func writeToFile(content string) error {
-	file, err := os.Create("out.txt")
-	if err != nil {
-		return err
+func copyToClipboard(text string) error {
+	tools := []struct {
+		name string
+		args []string
+	}{
+		{"wl-copy", nil},
+		{"xclip", []string{"-selection", "clipboard"}},
+		{"xsel", []string{"--clipboard", "--input"}},
 	}
-	defer file.Close()
 
-	_, err = file.WriteString(content)
-	return err
+	for _, tool := range tools {
+		cmd := exec.Command(tool.name, tool.args...)
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			continue
+		}
+		if err := cmd.Start(); err != nil {
+			continue
+		}
+		if _, err := stdin.Write([]byte(text)); err != nil {
+			stdin.Close()
+			continue
+		}
+		stdin.Close()
+		if err := cmd.Wait(); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("no clipboard tool available")
 }
 
 func readPasswordWithStars(prompt string) (string, error) {
@@ -186,11 +207,12 @@ func main() {
 		}
 	}
 
-	err = writeToFile(result)
+	err = copyToClipboard(result)
 	if err != nil {
-		fmt.Printf("File write error: %v\n", err)
+		fmt.Printf("Clipboard error: %v\n", err)
+		fmt.Println("Result:", result)
 		os.Exit(1)
 	}
 
-	fmt.Println("Success! Result saved to out.txt")
+	fmt.Println("Success! Result copied to clipboard.")
 }
