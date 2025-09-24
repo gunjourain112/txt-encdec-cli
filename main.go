@@ -12,6 +12,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
+
+	"golang.org/x/term"
 )
 
 func deriveKey(secret string) []byte {
@@ -74,6 +77,16 @@ func writeToFile(content string) error {
 	return err
 }
 
+func readPassword(prompt string) (string, error) {
+	fmt.Print(prompt)
+	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		return "", err
+	}
+	fmt.Println()
+	return string(bytePassword), nil
+}
+
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 
@@ -94,12 +107,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Print("Enter Secret Key: ")
-	if !scanner.Scan() {
+	// 마스킹 처리된 비밀키 입력
+	secretKey, err := readPassword("Enter Secret Key: ")
+	if err != nil {
 		fmt.Println("Error reading secret key")
 		os.Exit(1)
 	}
-	secretKey := scanner.Text()
 
 	var promptText string
 	if mode == 1 {
