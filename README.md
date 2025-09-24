@@ -1,10 +1,14 @@
 # txt-encdec-cli
 My lightweight text encryption/decryption script that I use on Fedora.
 
+### Demo
+![demo](./screenshot/demo.gif)
+
 ### Build and Run
 ```bash
 git clone https://github.com/gunjourain112/txt-encdec-cli.git
 cd txt-encdec-cli
+go clean -cache -modcache
 go build -o enc .
 ./enc
 ```
