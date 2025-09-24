@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -98,6 +99,18 @@ func copyToClipboard(text string) error {
 	return fmt.Errorf("no clipboard tool available")
 }
 
+func isCapsLockOn() bool {
+	files, err := filepath.Glob("/sys/class/leds/input*::capslock/brightness")
+	if err != nil || len(files) == 0 {
+		return false
+	}
+	content, err := os.ReadFile(files[0])
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(content)) == "1"
+}
+
 func readPasswordWithStars(prompt string) (string, error) {
 	fmt.Print(prompt)
 
@@ -130,7 +143,7 @@ func readPasswordWithStars(prompt string) (string, error) {
 		if char == 127 || char == 8 {
 			if len(password) > 0 {
 				password = password[:len(password)-1]
-				fmt.Print("\b \b")
+				redrawPasswordLine(prompt, password) // 라인 다시 그림
 			}
 			continue
 		}
@@ -144,12 +157,29 @@ func readPasswordWithStars(prompt string) (string, error) {
 		// 일반
 		if char >= 32 && char <= 126 {
 			password = append(password, char)
-			fmt.Print("*")
+			redrawPasswordLine(prompt, password) // 라인 다시 그림
 		}
 	}
 
 	fmt.Println()
 	return string(password), nil
+}
+
+func redrawPasswordLine(prompt string, password []byte) {
+	capsOn := isCapsLockOn()
+
+	fmt.Print("\r\033[K")
+	fmt.Print(prompt)
+
+	if capsOn {
+		fmt.Print(" [CAPS] ")
+	} else {
+		fmt.Print(" ")
+	}
+
+	for i := 0; i < len(password); i++ {
+		fmt.Print("*")
+	}
 }
 
 func main() {
@@ -170,6 +200,10 @@ func main() {
 	if err != nil || (mode != 1 && mode != 2) {
 		fmt.Println("Error: Invalid mode. Please enter 1 or 2.")
 		os.Exit(1)
+	}
+
+	if isCapsLockOn() {
+		fmt.Println("WARNING: CAPS LOCK is ON")
 	}
 
 	secretKey, err := readPasswordWithStars("Enter Secret Key: ")
