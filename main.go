@@ -77,14 +77,58 @@ func writeToFile(content string) error {
 	return err
 }
 
-func readPassword(prompt string) (string, error) {
+func readPasswordWithStars(prompt string) (string, error) {
 	fmt.Print(prompt)
-	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+
+	oldState, err := term.MakeRaw(int(syscall.Stdin))
 	if err != nil {
 		return "", err
 	}
+	defer term.Restore(int(syscall.Stdin), oldState)
+
+	var password []byte
+	var b [1]byte
+
+	for {
+		n, err := os.Stdin.Read(b[:])
+		if err != nil {
+			return "", err
+		}
+		if n == 0 {
+			continue
+		}
+
+		char := b[0]
+
+		// 엔터 (13 or 10)
+		if char == 13 || char == 10 {
+			break
+		}
+
+		// 백스페이스 (127 or 8)
+		if char == 127 || char == 8 {
+			if len(password) > 0 {
+				password = password[:len(password)-1]
+				fmt.Print("\b \b")
+			}
+			continue
+		}
+
+		// Ctrl+C (3)
+		if char == 3 {
+			fmt.Println()
+			os.Exit(1)
+		}
+
+		// 일반
+		if char >= 32 && char <= 126 {
+			password = append(password, char)
+			fmt.Print("*")
+		}
+	}
+
 	fmt.Println()
-	return string(bytePassword), nil
+	return string(password), nil
 }
 
 func main() {
@@ -107,8 +151,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 마스킹 처리된 비밀키 입력
-	secretKey, err := readPassword("Enter Secret Key: ")
+	secretKey, err := readPasswordWithStars("Enter Secret Key: ")
 	if err != nil {
 		fmt.Println("Error reading secret key")
 		os.Exit(1)
