@@ -36,7 +36,6 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(primaryColor).
 			Padding(1, 2).
-			Width(50).
 			MarginBottom(1)
 
 	ResultStyle = lipgloss.NewStyle().

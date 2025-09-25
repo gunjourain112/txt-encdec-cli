@@ -21,23 +21,23 @@ const (
 )
 
 type Model struct {
-	state       state
-	modeChoices []string
-	cursor      int
-	chosenMode  string
-	textInput   textinput.Model
-	secretKey   string
-	result      string
-	err         error
-	isCaps      bool
-	hasKorean   bool
+	state         state
+	modeChoices   []string
+	cursor        int
+	chosenMode    string
+	textInput     textinput.Model
+	secretKey     string
+	result        string
+	err           error
+	width, height int
+	isCaps        bool
+	hasKorean     bool
 }
 
 func New() Model {
 	ti := textinput.New()
 	ti.Focus()
 	ti.CharLimit = 1024
-	ti.Width = 46
 
 	return Model{
 		state:       stateChooseMode,
@@ -54,6 +54,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
@@ -162,11 +166,17 @@ func (m Model) View() string {
 
 	case stateEnterSecret:
 		content.WriteString(ListPromptStyle.Render("Enter Secret Key:") + "\n")
+		if m.width > 0 {
+			m.textInput.Width = m.width - 16
+		}
 		content.WriteString(TextInputStyle.Render(m.textInput.View()) + "\n")
 		content.WriteString(HelpStyle.Render("enter: confirm , ctrl+c: quit"))
 
 	case stateEnterText:
 		content.WriteString(ListPromptStyle.Render(fmt.Sprintf("Enter Text to %s:", m.chosenMode)) + "\n")
+		if m.width > 0 {
+			m.textInput.Width = m.width - 16
+		}
 		content.WriteString(TextInputStyle.Render(m.textInput.View()) + "\n")
 		content.WriteString(HelpStyle.Render("enter: confirm , ctrl+c: quit"))
 
