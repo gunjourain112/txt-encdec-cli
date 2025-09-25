@@ -4,37 +4,43 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 	"txt-encdec-cli/core"
 	"txt-encdec-cli/platform"
+	"txt-encdec-cli/tui"
 	"txt-encdec-cli/ui"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
 	defer platform.RestoreTerminal()
 
+	m := tui.New()
+	p := tea.NewProgram(m)
+
+	finalModel, err := p.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TUI error: %v", err)
+		os.Exit(1)
+	}
+
+	tuiModel := finalModel.(tui.Model)
+	chosenMode, selected := tuiModel.GetSelectedMode()
+
+	if !selected {
+		return
+	}
+
+	processCLI(chosenMode)
+}
+
+func processCLI(mode string) {
 	scanner := bufio.NewScanner(os.Stdin)
 
-	fmt.Println("=== Text Encryption Tool ===")
-	fmt.Println("1. Encrypt")
-	fmt.Println("2. Decrypt")
-	fmt.Print("Mode: ")
-
-	if !scanner.Scan() {
-		fmt.Println("Error reading input")
-		os.Exit(1)
-	}
-
-	modeStr := strings.TrimSpace(scanner.Text())
-	mode, err := strconv.Atoi(modeStr)
-	if err != nil || (mode != 1 && mode != 2) {
-		fmt.Println("Error: Invalid mode. Please enter 1 or 2.")
-		os.Exit(1)
-	}
+	fmt.Printf("\nSelected mode: %s\n", mode)
 
 	if platform.IsCapsLockOn() {
-		fmt.Println("\033[31mWARNING: CAPS LOCK is ON\033[0m")
+		fmt.Println("\033[31m⚠️  WARNING: CAPS LOCK is ON\033[0m")
 	}
 
 	secretKey, err := ui.ReadPasswordWithStars("Enter Secret Key: ")
@@ -44,7 +50,7 @@ func main() {
 	}
 
 	var promptText string
-	if mode == 1 {
+	if mode == "Encrypt" {
 		promptText = "Enter text to encrypt: "
 	} else {
 		promptText = "Enter text to decrypt: "
@@ -58,7 +64,7 @@ func main() {
 	inputText := scanner.Text()
 
 	var result string
-	if mode == 1 {
+	if mode == "Encrypt" {
 		result, err = core.Encrypt(secretKey, inputText)
 		if err != nil {
 			fmt.Printf("Encryption error: %v\n", err)

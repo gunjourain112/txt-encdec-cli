@@ -48,6 +48,7 @@ func ReadPasswordWithStars(prompt string) (string, error) {
 		if char == 13 || char == 10 {
 			break
 		}
+
 		if char == 127 || char == 8 {
 			if len(password) > 0 {
 				password = password[:len(password)-1]
