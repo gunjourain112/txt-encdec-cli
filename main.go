@@ -10,12 +10,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"golang.org/x/term"
 )
+
+var originalTerminalState *term.State
 
 func deriveKey(secret string) []byte {
 	h := sha256.Sum256([]byte(secret))
@@ -66,33 +71,105 @@ func decrypt(secret, encoded string) (string, error) {
 	return string(plaintext), nil
 }
 
-func writeToFile(content string) error {
-	file, err := os.Create("out.txt")
-	if err != nil {
-		return err
+func copyToClipboard(text string) error {
+	tools := []struct {
+		name string
+		args []string
+	}{
+		{"wl-copy", nil},
+		{"xclip", []string{"-selection", "clipboard"}},
+		{"xsel", []string{"--clipboard", "--input"}},
 	}
-	defer file.Close()
 
-	_, err = file.WriteString(content)
-	return err
+	for _, tool := range tools {
+		cmd := exec.Command(tool.name, tool.args...)
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			continue
+		}
+		if err := cmd.Start(); err != nil {
+			continue
+		}
+		if _, err := stdin.Write([]byte(text)); err != nil {
+			stdin.Close()
+			continue
+		}
+		stdin.Close()
+		if err := cmd.Wait(); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("no clipboard tool available")
+}
+
+func isCapsLockOn() bool {
+	files, err := filepath.Glob("/sys/class/leds/input*::capslock/brightness")
+	if err != nil || len(files) == 0 {
+		return false
+	}
+	content, err := os.ReadFile(files[0])
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(content)) == "1"
+}
+
+// 한글 체크 (last word)
+func isKoreanInputMode(lastChar byte) bool {
+	return lastChar >= 0x80 // UTF-8
+}
+
+// 터미널 상태 복원
+func restoreTerminal() {
+	if originalTerminalState != nil {
+		term.Restore(int(syscall.Stdin), originalTerminalState)
+		originalTerminalState = nil
+	}
+}
+
+// 시그널 핸들러
+func setupSignalHandler() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-c
+		fmt.Println("\nProgram interrupted. Restoring terminal...")
+		restoreTerminal()
+		os.Exit(0)
+	}()
 }
 
 func readPasswordWithStars(prompt string) (string, error) {
 	fmt.Print(prompt)
 
-	oldState, err := term.MakeRaw(int(syscall.Stdin))
+	// 원본 터미널 상태 저장
+	var err error
+	originalTerminalState, err = term.GetState(int(syscall.Stdin))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get terminal state: %v", err)
 	}
-	defer term.Restore(int(syscall.Stdin), oldState)
+
+	setupSignalHandler()
+
+	// Raw 모드로 전환
+	rawState, err := term.MakeRaw(int(syscall.Stdin))
+	if err != nil {
+		return "", fmt.Errorf("failed to make terminal raw: %v", err)
+	}
+
+	defer func() {
+		term.Restore(int(syscall.Stdin), rawState)
+		restoreTerminal()
+	}()
 
 	var password []byte
 	var b [1]byte
+	var lastInputChar byte = 0 // 마지막 입력 문자 추적
 
 	for {
 		n, err := os.Stdin.Read(b[:])
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("failed to read input: %v", err)
 		}
 		if n == 0 {
 			continue
@@ -109,21 +186,28 @@ func readPasswordWithStars(prompt string) (string, error) {
 		if char == 127 || char == 8 {
 			if len(password) > 0 {
 				password = password[:len(password)-1]
-				fmt.Print("\b \b")
+				lastInputChar = 0                                           // 마지막 문자 초기화
+				redrawPasswordLineWithMode(prompt, password, lastInputChar) // 라인 다시 그림
 			}
 			continue
 		}
 
 		// Ctrl+C (3)
 		if char == 3 {
-			fmt.Println()
-			os.Exit(1)
+			fmt.Println("\nProgram interrupted. Restoring terminal...")
+			restoreTerminal()
+			os.Exit(0)
 		}
 
 		// 일반
 		if char >= 32 && char <= 126 {
 			password = append(password, char)
-			fmt.Print("*")
+			lastInputChar = char
+			redrawPasswordLineWithMode(prompt, password, lastInputChar) // 라인 다시 그림
+		} else if char >= 0x80 {
+			password = append(password, char)
+			lastInputChar = char
+			redrawPasswordLineWithMode(prompt, password, lastInputChar) // 라인 다시 그림
 		}
 	}
 
@@ -131,7 +215,35 @@ func readPasswordWithStars(prompt string) (string, error) {
 	return string(password), nil
 }
 
+func redrawPasswordLineWithMode(prompt string, password []byte, lastChar byte) {
+	capsOn := isCapsLockOn()
+	koreanOn := isKoreanInputMode(lastChar)
+
+	fmt.Print("\r\033[K")
+	fmt.Print(prompt)
+
+	var statusParts []string
+	if koreanOn {
+		statusParts = append(statusParts, "\033[31m[한글]\033[0m")
+	}
+	if capsOn {
+		statusParts = append(statusParts, "\033[31m[CAPS]\033[0m")
+	}
+
+	if len(statusParts) > 0 {
+		fmt.Print(" " + strings.Join(statusParts, " ") + " ")
+	} else {
+		fmt.Print(" ")
+	}
+
+	for i := 0; i < len(password); i++ {
+		fmt.Print("*")
+	}
+}
+
 func main() {
+	defer restoreTerminal()
+
 	scanner := bufio.NewScanner(os.Stdin)
 
 	fmt.Println("=== Text Encryption Tool ===")
@@ -151,9 +263,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	if isCapsLockOn() {
+		fmt.Println("\033[31mWARNING: CAPS LOCK is ON\033[0m")
+	}
+
 	secretKey, err := readPasswordWithStars("Enter Secret Key: ")
 	if err != nil {
-		fmt.Println("Error reading secret key")
+		fmt.Printf("Error reading secret key: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -186,11 +302,12 @@ func main() {
 		}
 	}
 
-	err = writeToFile(result)
+	err = copyToClipboard(result)
 	if err != nil {
-		fmt.Printf("File write error: %v\n", err)
+		fmt.Printf("Clipboard error: %v\n", err)
+		fmt.Println("Result:", result)
 		os.Exit(1)
 	}
 
-	fmt.Println("Success! Result saved to out.txt")
+	fmt.Println("Success! Result copied to clipboard.")
 }
