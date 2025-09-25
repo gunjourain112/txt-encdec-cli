@@ -14,7 +14,6 @@ func CopyToClipboard(text string) error {
 		{"xclip", []string{"-selection", "clipboard"}},
 		{"xsel", []string{"--clipboard", "--input"}},
 	}
-
 	for _, tool := range tools {
 		cmd := exec.Command(tool.name, tool.args...)
 		stdin, err := cmd.StdinPipe()

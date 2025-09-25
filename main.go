@@ -3,15 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
-	"txt-encdec-cli/platform"
 	"txt-encdec-cli/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
-	defer platform.RestoreTerminal()
-
 	m := tui.New()
 	p := tea.NewProgram(m)
 

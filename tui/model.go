@@ -43,6 +43,8 @@ func New() Model {
 		state:       stateChooseMode,
 		modeChoices: []string{"Encrypt", "Decrypt"},
 		textInput:   ti,
+		width:       80,
+		height:      24,
 	}
 }
 
@@ -64,7 +66,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.state == stateEnterSecret {
-			m.isCaps = platform.IsCapsLockOn()
+			m.isCaps = platform.IsCapsOnLinux()
 
 			if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
 				isKoreanInput := false
@@ -137,13 +139,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case stateShowResult, stateShowError:
 			if msg.Type == tea.KeyEnter {
-				return New(), nil
+				newModel := New()
+				newModel.width = m.width
+				newModel.height = m.height
+				return newModel, nil
 			}
 		}
 	}
 
 	m.textInput, cmd = m.textInput.Update(msg)
+
 	return m, cmd
+}
+
+func (m Model) getInputWidth() int {
+	const minWidth = 50
+	const maxWidth = 100
+
+	if m.width <= 0 || m.width < 66 {
+		return minWidth
+	}
+
+	calculated := m.width - 16
+	if calculated > maxWidth {
+		return maxWidth
+	}
+
+	return calculated
 }
 
 func (m Model) View() string {
@@ -166,18 +188,18 @@ func (m Model) View() string {
 
 	case stateEnterSecret:
 		content.WriteString(ListPromptStyle.Render("Enter Secret Key:") + "\n")
-		if m.width > 0 {
-			m.textInput.Width = m.width - 16
-		}
-		content.WriteString(TextInputStyle.Render(m.textInput.View()) + "\n")
+		inputWidth := m.getInputWidth()
+		m.textInput.Width = inputWidth
+		inputStyle := TextInputStyle.Width(inputWidth + 6)
+		content.WriteString(inputStyle.Render(m.textInput.View()) + "\n")
 		content.WriteString(HelpStyle.Render("enter: confirm , ctrl+c: quit"))
 
 	case stateEnterText:
 		content.WriteString(ListPromptStyle.Render(fmt.Sprintf("Enter Text to %s:", m.chosenMode)) + "\n")
-		if m.width > 0 {
-			m.textInput.Width = m.width - 16
-		}
-		content.WriteString(TextInputStyle.Render(m.textInput.View()) + "\n")
+		inputWidth := m.getInputWidth()
+		m.textInput.Width = inputWidth
+		inputStyle := TextInputStyle.Width(inputWidth + 6)
+		content.WriteString(inputStyle.Render(m.textInput.View()) + "\n")
 		content.WriteString(HelpStyle.Render("enter: confirm , ctrl+c: quit"))
 
 	case stateShowResult:

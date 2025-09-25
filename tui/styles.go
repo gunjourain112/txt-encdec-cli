@@ -48,9 +48,23 @@ var (
 			Bold(true).
 			MarginBottom(1)
 
+	CodeStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#1F2937")).
+			Foreground(lipgloss.Color("#F3F4F6")).
+			Padding(1, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(mutedColor)
+
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(mutedColor).
 			Italic(true)
+
+	StatusIndicatorStyle = lipgloss.NewStyle().
+				Background(accentColor).
+				Foreground(lipgloss.Color("#000000")).
+				Padding(0, 1).
+				Bold(true).
+				MarginRight(1)
 
 	CapsIndicatorStyle = lipgloss.NewStyle().
 				Background(errorColor).
