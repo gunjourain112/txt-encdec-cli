@@ -8,12 +8,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func main() {
-	m := tui.New()
-	p := tea.NewProgram(m)
+const (
+	appName    = "Text Encryptor"
+	appVersion = "2.0.0"
+)
 
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Alas, there's been an error: %v", err)
+func main() {
+	model := tui.New()
+	program := tea.NewProgram(
+		model,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+
+	if _, err := program.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s v%s: %v\n", appName, appVersion, err)
 		os.Exit(1)
 	}
 }

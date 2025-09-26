@@ -3,80 +3,100 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	primaryColor = lipgloss.Color("#7C3AED")
-	successColor = lipgloss.Color("#10B981")
-	errorColor   = lipgloss.Color("#EF4444")
-	mutedColor   = lipgloss.Color("#6B7280")
-	accentColor  = lipgloss.Color("#F59E0B")
+	PrimaryColor    = lipgloss.Color("#7C3AED")
+	SuccessColor    = lipgloss.Color("#10B981")
+	ErrorColor      = lipgloss.Color("#EF4444")
+	WarningColor    = lipgloss.Color("#F59E0B")
+	InfoColor       = lipgloss.Color("#3B82F6")
+	MutedColor      = lipgloss.Color("#6B7280")
+	BackgroundColor = lipgloss.Color("#1F2937")
+	ForegroundColor = lipgloss.Color("#F3F4F6")
+	WhiteColor      = lipgloss.Color("#FFFFFF")
+	BlackColor      = lipgloss.Color("#000000")
+)
 
+const (
+	AppPaddingHorizontal = 4
+	AppPaddingVertical   = 2
+	AppMarginHorizontal  = 2
+	AppMarginVertical    = 1
+	InputPadding         = 1
+	IndicatorPadding     = 1
+)
+
+var (
 	AppStyle = lipgloss.NewStyle().
-			Padding(2, 4).
-			Margin(1, 2)
+			Padding(AppPaddingVertical, AppPaddingHorizontal).
+			Margin(AppMarginVertical, AppMarginHorizontal)
 
 	LogoStyle = lipgloss.NewStyle().
-			Foreground(primaryColor).
+			Foreground(PrimaryColor).
 			Bold(true).
 			MarginBottom(1)
+)
 
+var (
 	ListPromptStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
+			Foreground(WhiteColor).
 			Bold(true).
 			MarginBottom(1)
 
 	ListItemStyle = lipgloss.NewStyle().
-			Foreground(mutedColor).
+			Foreground(MutedColor).
 			MarginBottom(0)
 
 	SelectedListItemStyle = lipgloss.NewStyle().
-				Foreground(accentColor).
+				Foreground(WarningColor).
 				Bold(true).
 				MarginBottom(0)
 
-	TextInputStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(primaryColor).
-			Padding(1, 2).
-			MarginBottom(1)
+	HelpStyle = lipgloss.NewStyle().
+			Foreground(MutedColor).
+			Italic(true)
+)
 
+var (
+	TextInputStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(PrimaryColor).
+		Padding(InputPadding, InputPadding*2).
+		MarginBottom(1)
+)
+
+var (
 	ResultStyle = lipgloss.NewStyle().
-			Foreground(successColor).
+			Foreground(SuccessColor).
 			Bold(true).
 			MarginBottom(1)
 
 	ErrorStyle = lipgloss.NewStyle().
-			Foreground(errorColor).
+			Foreground(ErrorColor).
 			Bold(true).
 			MarginBottom(1)
 
 	CodeStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1F2937")).
-			Foreground(lipgloss.Color("#F3F4F6")).
-			Padding(1, 2).
+			Background(BackgroundColor).
+			Foreground(ForegroundColor).
+			Padding(InputPadding, InputPadding*2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(mutedColor)
+			BorderForeground(MutedColor)
+)
 
-	HelpStyle = lipgloss.NewStyle().
-			Foreground(mutedColor).
-			Italic(true)
-
-	StatusIndicatorStyle = lipgloss.NewStyle().
-				Background(accentColor).
-				Foreground(lipgloss.Color("#000000")).
-				Padding(0, 1).
+var (
+	baseIndicatorStyle = lipgloss.NewStyle().
+				Padding(0, IndicatorPadding).
 				Bold(true).
 				MarginRight(1)
 
-	CapsIndicatorStyle = lipgloss.NewStyle().
-				Background(errorColor).
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Padding(0, 1).
-				Bold(true).
-				MarginRight(1)
+	CapsIndicatorStyle = baseIndicatorStyle.Copy().
+				Background(ErrorColor).
+				Foreground(WhiteColor)
 
-	KoreanIndicatorStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#3B82F6")).
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Padding(0, 1).
-				Bold(true).
-				MarginRight(1)
+	KoreanIndicatorStyle = baseIndicatorStyle.Copy().
+				Background(InfoColor).
+				Foreground(WhiteColor)
+
+	StatusIndicatorStyle = baseIndicatorStyle.Copy().
+				Background(WarningColor).
+				Foreground(BlackColor)
 )

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"txt-encdec-cli/core"
 	"txt-encdec-cli/platform"
 
@@ -10,41 +9,47 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type state int
-
-const (
-	stateChooseMode state = iota
-	stateEnterSecret
-	stateEnterText
-	stateShowResult
-	stateShowError
-)
-
 type Model struct {
-	state         state
-	modeChoices   []string
-	cursor        int
-	chosenMode    string
-	textInput     textinput.Model
-	secretKey     string
-	result        string
-	err           error
-	width, height int
-	isCaps        bool
-	hasKorean     bool
+	state        AppState
+	mode         OperationMode
+	cursor       int
+	terminalSize TerminalSize
+
+	textInput  textinput.Model
+	inputState InputState
+
+	cryptor   core.Cryptor
+	clipboard platform.ClipboardManager
+	detector  platform.SystemStateDetector
+
+	layout *LayoutManager
+	config AppConfig
+
+	secretKey string
+	result    string
+	lastError error
+
+	availableModes []string
 }
 
 func New() Model {
+	return NewWithConfig(DefaultConfig())
+}
+
+func NewWithConfig(config AppConfig) Model {
 	ti := textinput.New()
 	ti.Focus()
-	ti.CharLimit = 1024
+	ti.CharLimit = config.InputCharLimit
 
 	return Model{
-		state:       stateChooseMode,
-		modeChoices: []string{"Encrypt", "Decrypt"},
-		textInput:   ti,
-		width:       80,
-		height:      24,
+		state:          StateSelectMode,
+		terminalSize:   TerminalSize{Width: config.DefaultWidth, Height: config.DefaultHeight},
+		textInput:      ti,
+		clipboard:      platform.NewLinuxClipboardManager(),
+		detector:       platform.NewLinuxSystemDetector(),
+		layout:         NewLayoutManager(config),
+		config:         config,
+		availableModes: []string{"Encrypt", "Decrypt"},
 	}
 }
 
@@ -53,178 +58,193 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.terminalSize = TerminalSize{Width: msg.Width, Height: msg.Height}
 
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}
 
-		if m.state == stateEnterSecret {
-			m.isCaps = platform.IsCapsOnLinux()
-
-			if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
-				isKoreanInput := false
-				for _, r := range msg.Runes {
-					if (r >= 0xAC00 && r <= 0xD7A3) ||
-						(r >= 0x3131 && r <= 0x318E) {
-						isKoreanInput = true
-						break
-					}
-				}
-
-				if isKoreanInput {
-					m.hasKorean = true
-				} else {
-					m.hasKorean = false
-				}
-			}
+		if m.state == StateEnterSecret {
+			m.updateInputState(msg)
 		} else {
-			m.isCaps = false
-			m.hasKorean = false
+			m.clearInputState()
 		}
 
-		switch m.state {
-		case stateChooseMode:
-			switch msg.String() {
-			case "q":
-				return m, tea.Quit
-			case "up", "k":
-				if m.cursor > 0 {
-					m.cursor--
-				}
-			case "down", "j":
-				if m.cursor < len(m.modeChoices)-1 {
-					m.cursor++
-				}
-			case "enter":
-				m.chosenMode = m.modeChoices[m.cursor]
-				m.state = stateEnterSecret
-				m.textInput.Prompt = ""
-				m.textInput.EchoMode = textinput.EchoPassword
-				m.textInput.EchoCharacter = '*'
-				return m, textinput.Blink
-			}
-		case stateEnterSecret:
-			if msg.Type == tea.KeyEnter {
-				m.secretKey = m.textInput.Value()
-				m.state = stateEnterText
-				m.textInput.Prompt = ""
-				m.textInput.EchoMode = textinput.EchoNormal
-				m.textInput.Reset()
-				return m, textinput.Blink
-			}
-		case stateEnterText:
-			if msg.Type == tea.KeyEnter {
-				inputText := m.textInput.Value()
-				var err error
-				if m.chosenMode == "Encrypt" {
-					m.result, err = core.Encrypt(m.secretKey, inputText)
-				} else {
-					m.result, err = core.Decrypt(m.secretKey, inputText)
-				}
-				if err != nil {
-					m.state = stateShowError
-					m.err = err
-				} else {
-					m.state = stateShowResult
-					_ = platform.CopyToClipboard(m.result)
-				}
-				return m, nil
-			}
-		case stateShowResult, stateShowError:
-			if msg.Type == tea.KeyEnter {
-				newModel := New()
-				newModel.width = m.width
-				newModel.height = m.height
-				return newModel, nil
-			}
+		if cmd := m.handleKeyEvent(msg); cmd != nil {
+			return m, cmd
 		}
 	}
 
+	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
 
 	return m, cmd
 }
 
-func (m Model) getInputWidth() int {
-	const minWidth = 50
-	const maxWidth = 100
+func (m *Model) updateInputState(msg tea.KeyMsg) {
+	m.inputState.CapsLockOn = m.detector.IsCapsLockOn()
 
-	if m.width <= 0 || m.width < 66 {
-		return minWidth
+	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+		hasKorean := false
+		hasLatin := false
+
+		for _, r := range msg.Runes {
+			if m.detector.IsKoreanInput(r) {
+				hasKorean = true
+			} else if m.detector.IsLatinInput(r) {
+				hasLatin = true
+			}
+		}
+
+		if hasKorean {
+			m.inputState.KoreanActive = true
+		} else if hasLatin {
+			m.inputState.KoreanActive = false
+		}
+	}
+}
+
+func (m *Model) clearInputState() {
+	m.inputState = InputState{}
+}
+
+func (m *Model) handleKeyEvent(msg tea.KeyMsg) tea.Cmd {
+	switch m.state {
+	case StateSelectMode:
+		return m.handleModeSelection(msg)
+	case StateEnterSecret:
+		return m.handleSecretEntry(msg)
+	case StateEnterText:
+		return m.handleTextEntry(msg)
+	case StateShowResult, StateShowError:
+		return m.handleResultScreen(msg)
+	}
+	return nil
+}
+
+func (m *Model) handleModeSelection(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "q":
+		return tea.Quit
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < len(m.availableModes)-1 {
+			m.cursor++
+		}
+	case "enter":
+		m.mode = OperationMode(m.cursor)
+		m.transitionToSecretEntry()
+		return textinput.Blink
+	}
+	return nil
+}
+
+func (m *Model) handleSecretEntry(msg tea.KeyMsg) tea.Cmd {
+	if msg.Type == tea.KeyEnter {
+		m.secretKey = m.textInput.Value()
+		m.cryptor = core.NewAESCryptor(m.secretKey)
+		m.transitionToTextEntry()
+		return textinput.Blink
+	}
+	return nil
+}
+
+func (m *Model) handleTextEntry(msg tea.KeyMsg) tea.Cmd {
+	if msg.Type == tea.KeyEnter {
+		inputText := m.textInput.Value()
+		m.processInput(inputText)
+	}
+	return nil
+}
+
+func (m *Model) handleResultScreen(msg tea.KeyMsg) tea.Cmd {
+	if msg.Type == tea.KeyEnter {
+		return m.resetToModeSelection()
+	}
+	return nil
+}
+
+func (m *Model) transitionToSecretEntry() {
+	m.state = StateEnterSecret
+	m.textInput.Prompt = ""
+	m.textInput.EchoMode = textinput.EchoPassword
+	m.textInput.EchoCharacter = '*'
+	m.textInput.Reset()
+}
+
+func (m *Model) transitionToTextEntry() {
+	m.state = StateEnterText
+	m.textInput.Prompt = ""
+	m.textInput.EchoMode = textinput.EchoNormal
+	m.textInput.Reset()
+}
+
+func (m *Model) processInput(inputText string) {
+	var result string
+	var err error
+
+	switch m.mode {
+	case ModeEncrypt:
+		result, err = m.cryptor.Encrypt(inputText)
+	case ModeDecrypt:
+		result, err = m.cryptor.Decrypt(inputText)
+	default:
+		err = &AppError{Op: "process_input", Err: ErrInvalidOperation}
 	}
 
-	calculated := m.width - 16
-	if calculated > maxWidth {
-		return maxWidth
+	if err != nil {
+		m.state = StateShowError
+		m.lastError = err
+	} else {
+		m.state = StateShowResult
+		m.result = result
+		_ = m.clipboard.Copy(result)
 	}
+}
 
-	return calculated
+func (m *Model) resetToModeSelection() tea.Cmd {
+	newModel := NewWithConfig(m.config)
+	newModel.terminalSize = m.terminalSize
+	*m = newModel
+	return nil
 }
 
 func (m Model) View() string {
-	var content strings.Builder
-
-	logo := " TEXT ENCRYPTOR "
-	content.WriteString(LogoStyle.Render(logo) + "\n\n")
+	var content string
 
 	switch m.state {
-	case stateChooseMode:
-		content.WriteString(ListPromptStyle.Render("Select encryption mode:") + "\n")
-		for i, choice := range m.modeChoices {
-			if m.cursor == i {
-				content.WriteString(SelectedListItemStyle.Render("> "+choice) + "\n")
-			} else {
-				content.WriteString(ListItemStyle.Render("  "+choice) + "\n")
-			}
-		}
-		content.WriteString("\n" + HelpStyle.Render("up/down: navigate , enter: select , q/ctrl+c: quit"))
+	case StateSelectMode:
+		content = m.layout.RenderModeSelection(m.cursor, m.availableModes)
 
-	case stateEnterSecret:
-		content.WriteString(ListPromptStyle.Render("Enter Secret Key:") + "\n")
-		inputWidth := m.getInputWidth()
+	case StateEnterSecret:
+		inputWidth := m.layout.CalculateInputWidth(m.terminalSize)
 		m.textInput.Width = inputWidth
-		inputStyle := TextInputStyle.Width(inputWidth + 6)
-		content.WriteString(inputStyle.Render(m.textInput.View()) + "\n")
-		content.WriteString(HelpStyle.Render("enter: confirm , ctrl+c: quit"))
+		inputView := m.layout.CreateStyledInput(m.textInput.View(), inputWidth)
+		content = m.layout.RenderInputPrompt("Enter Secret Key:", inputView, "enter: confirm , ctrl+c: quit")
+		content += m.layout.RenderInputState(m.inputState)
 
-	case stateEnterText:
-		content.WriteString(ListPromptStyle.Render(fmt.Sprintf("Enter Text to %s:", m.chosenMode)) + "\n")
-		inputWidth := m.getInputWidth()
+	case StateEnterText:
+		inputWidth := m.layout.CalculateInputWidth(m.terminalSize)
 		m.textInput.Width = inputWidth
-		inputStyle := TextInputStyle.Width(inputWidth + 6)
-		content.WriteString(inputStyle.Render(m.textInput.View()) + "\n")
-		content.WriteString(HelpStyle.Render("enter: confirm , ctrl+c: quit"))
+		inputView := m.layout.CreateStyledInput(m.textInput.View(), inputWidth)
+		title := fmt.Sprintf("Enter Text to %s:", m.mode.String())
+		content = m.layout.RenderInputPrompt(title, inputView, "enter: confirm , ctrl+c: quit")
 
-	case stateShowResult:
-		content.WriteString(ResultStyle.Render(" Success! Result copied to clipboard") + "\n\n")
-		content.WriteString(HelpStyle.Render(fmt.Sprintf("Result length: %d characters", len(m.result))) + "\n\n")
-		content.WriteString(HelpStyle.Render("enter: continue"))
+	case StateShowResult:
+		message := "Success! Result copied to clipboard"
+		details := fmt.Sprintf("Result length: %d characters", len(m.result))
+		content = m.layout.RenderResult(true, message, details)
 
-	case stateShowError:
-		content.WriteString(ErrorStyle.Render(" Error: "+m.err.Error()) + "\n\n")
-		content.WriteString(HelpStyle.Render("enter: continue"))
+	case StateShowError:
+		message := fmt.Sprintf("Error: %v", m.lastError)
+		content = m.layout.RenderResult(false, message, "")
 	}
 
-	if m.state == stateEnterSecret {
-		var statusParts []string
-		if m.hasKorean {
-			statusParts = append(statusParts, KoreanIndicatorStyle.Render("한글"))
-		}
-		if m.isCaps {
-			statusParts = append(statusParts, CapsIndicatorStyle.Render("CAPS"))
-		}
-
-		if len(statusParts) > 0 {
-			content.WriteString("\n\n" + strings.Join(statusParts, " "))
-		}
-	}
-
-	return AppStyle.Render(content.String())
+	return m.layout.RenderApp(content)
 }
