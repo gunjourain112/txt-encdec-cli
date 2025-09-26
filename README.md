@@ -3,6 +3,8 @@ My lightweight text encryption/decryption script that I use on Fedora.
 
 리눅스 전용
 
+![Demo](assets/demo.gif)
+
 ### Build and Run
 ```bash
 git clone https://github.com/gunjourain112/txt-encdec-cli.git
