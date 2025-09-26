@@ -1,8 +1,7 @@
 # txt-encdec-cli
 My lightweight text encryption/decryption script that I use on Fedora.
 
-### Demo
-![demo](./screenshot/demo.gif)
+리눅스 전용
 
 ### Build and Run
 ```bash
