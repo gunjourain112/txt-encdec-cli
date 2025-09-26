@@ -5,21 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
 var (
+	ClipboardTimeout   = 17 * time.Second
 	ErrNoClipboardTool = errors.New("no clipboard tool available")
 	ErrClipboardFailed = errors.New("clipboard operation failed")
 )
 
 type ClipboardManager interface {
 	Copy(text string) error
+	Read() (string, error)
 }
 
 type clipboardTool struct {
-	name string
-	args []string
+	name     string
+	copyArgs []string
+	readArgs []string
 }
 
 type LinuxClipboardManager struct {
@@ -30,17 +34,17 @@ type LinuxClipboardManager struct {
 func NewLinuxClipboardManager() *LinuxClipboardManager {
 	return &LinuxClipboardManager{
 		tools: []clipboardTool{
-			{"wl-copy", nil},
-			{"xclip", []string{"-selection", "clipboard"}},
-			{"xsel", []string{"--clipboard", "--input"}},
+			{"wl-copy", nil, []string{"wl-paste"}},
+			{"xclip", []string{"-selection", "clipboard"}, []string{"-selection", "clipboard", "-o"}},
+			{"xsel", []string{"--clipboard", "--input"}, []string{"--clipboard", "--output"}},
 		},
-		timeout: 5 * time.Second,
+		timeout: ClipboardTimeout,
 	}
 }
 
 func (m *LinuxClipboardManager) Copy(text string) error {
 	if text == "" {
-		return nil
+		return m.clearClipboard()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
@@ -49,6 +53,26 @@ func (m *LinuxClipboardManager) Copy(text string) error {
 	var lastErr error
 	for _, tool := range m.tools {
 		if err := m.copyWithTool(ctx, tool, text); err == nil {
+			m.startBackgroundClear(text, 2*time.Second)
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("%w: %v", ErrClipboardFailed, lastErr)
+	}
+	return ErrNoClipboardTool
+}
+
+func (m *LinuxClipboardManager) clearClipboard() error {
+	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
+	defer cancel()
+
+	var lastErr error
+	for _, tool := range m.tools {
+		if err := m.copyWithTool(ctx, tool, ""); err == nil {
 			return nil
 		} else {
 			lastErr = err
@@ -62,7 +86,7 @@ func (m *LinuxClipboardManager) Copy(text string) error {
 }
 
 func (m *LinuxClipboardManager) copyWithTool(ctx context.Context, tool clipboardTool, text string) error {
-	cmd := exec.CommandContext(ctx, tool.name, tool.args...)
+	cmd := exec.CommandContext(ctx, tool.name, tool.copyArgs...)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -86,8 +110,61 @@ func (m *LinuxClipboardManager) copyWithTool(ctx context.Context, tool clipboard
 	return nil
 }
 
+func (m *LinuxClipboardManager) Read() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
+	defer cancel()
+
+	var lastErr error
+	for _, tool := range m.tools {
+		if content, err := m.readWithTool(ctx, tool); err == nil {
+			return content, nil
+		} else {
+			lastErr = err
+		}
+	}
+
+	if lastErr != nil {
+		return "", fmt.Errorf("%w: %v", ErrClipboardFailed, lastErr)
+	}
+	return "", ErrNoClipboardTool
+}
+
+func (m *LinuxClipboardManager) readWithTool(ctx context.Context, tool clipboardTool) (string, error) {
+	var cmd *exec.Cmd
+	if tool.name == "wl-copy" {
+		cmd = exec.CommandContext(ctx, "wl-paste")
+	} else {
+		cmd = exec.CommandContext(ctx, tool.name, tool.readArgs...)
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("%s failed: %w", tool.name, err)
+	}
+
+	return string(output), nil
+}
+
+func (m *LinuxClipboardManager) startBackgroundClear(originalText string, delay time.Duration) {
+	script := fmt.Sprintf(`(
+		sleep %d
+		current=$(wl-paste 2>/dev/null || xclip -selection clipboard -o 2>/dev/null || xsel --clipboard --output 2>/dev/null)
+		if [ "$current" = "%s" ]; then
+			echo "" | wl-copy 2>/dev/null || echo "" | xclip -selection clipboard 2>/dev/null || echo "" | xsel --clipboard --input 2>/dev/null
+		fi
+	) &`, int(delay.Seconds()), originalText)
+
+	cmd := exec.Command("sh", "-c", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Start()
+}
+
 var defaultClipboard ClipboardManager = NewLinuxClipboardManager()
 
 func CopyToClipboard(text string) error {
 	return defaultClipboard.Copy(text)
+}
+
+func ClearClipboard() error {
+	return defaultClipboard.Copy("")
 }

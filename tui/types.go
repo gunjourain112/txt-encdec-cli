@@ -13,6 +13,7 @@ const (
 	StateEnterText
 	StateShowResult
 	StateShowError
+	StateWaitingToClear
 )
 
 func (s AppState) String() string {

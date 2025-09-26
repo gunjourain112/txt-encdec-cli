@@ -121,6 +121,8 @@ func (m *Model) handleKeyEvent(msg tea.KeyMsg) tea.Cmd {
 		return m.handleTextEntry(msg)
 	case StateShowResult, StateShowError:
 		return m.handleResultScreen(msg)
+	case StateWaitingToClear:
+		return m.handleClipboardClear(msg)
 	}
 	return nil
 }
@@ -202,10 +204,15 @@ func (m *Model) processInput(inputText string) {
 		m.state = StateShowError
 		m.lastError = err
 	} else {
-		m.state = StateShowResult
 		m.result = result
-		_ = m.clipboard.Copy(result)
+		_ = platform.CopyToClipboard(result)
+		m.state = StateShowResult
 	}
+}
+
+func (m *Model) handleClipboardClear(msg tea.KeyMsg) tea.Cmd {
+	_ = platform.ClearClipboard()
+	return m.resetToModeSelection()
 }
 
 func (m *Model) resetToModeSelection() tea.Cmd {
@@ -244,6 +251,11 @@ func (m Model) View() string {
 	case StateShowError:
 		message := fmt.Sprintf("Error: %v", m.lastError)
 		content = m.layout.RenderResult(false, message, "")
+
+	case StateWaitingToClear:
+		message := "Success! Result copied to clipboard"
+		details := "Press any key to clear clipboard and continue"
+		content = m.layout.RenderResult(true, message, details)
 	}
 
 	return m.layout.RenderApp(content)
