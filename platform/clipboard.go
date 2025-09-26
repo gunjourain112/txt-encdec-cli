@@ -9,8 +9,12 @@ import (
 	"time"
 )
 
+const (
+	ClipboardExecTimeout    = 4 * time.Second
+	ClipboardAutoClearDelay = 11 * time.Second
+)
+
 var (
-	ClipboardTimeout   = 17 * time.Second
 	ErrNoClipboardTool = errors.New("no clipboard tool available")
 	ErrClipboardFailed = errors.New("clipboard operation failed")
 )
@@ -38,7 +42,7 @@ func NewLinuxClipboardManager() *LinuxClipboardManager {
 			{"xclip", []string{"-selection", "clipboard"}, []string{"-selection", "clipboard", "-o"}},
 			{"xsel", []string{"--clipboard", "--input"}, []string{"--clipboard", "--output"}},
 		},
-		timeout: ClipboardTimeout,
+		timeout: ClipboardExecTimeout,
 	}
 }
 
@@ -53,7 +57,7 @@ func (m *LinuxClipboardManager) Copy(text string) error {
 	var lastErr error
 	for _, tool := range m.tools {
 		if err := m.copyWithTool(ctx, tool, text); err == nil {
-			m.startBackgroundClear(text, 2*time.Second)
+			m.startBackgroundClear(text, ClipboardAutoClearDelay)
 			return nil
 		} else {
 			lastErr = err
@@ -146,15 +150,7 @@ func (m *LinuxClipboardManager) readWithTool(ctx context.Context, tool clipboard
 }
 
 func (m *LinuxClipboardManager) startBackgroundClear(originalText string, delay time.Duration) {
-	script := fmt.Sprintf(`(
-		sleep %d
-		current=$(wl-paste 2>/dev/null || xclip -selection clipboard -o 2>/dev/null || xsel --clipboard --output 2>/dev/null)
-		if [ "$current" = "%s" ]; then
-			echo "" | wl-copy 2>/dev/null || echo "" | xclip -selection clipboard 2>/dev/null || echo "" | xsel --clipboard --input 2>/dev/null
-		fi
-	) &`, int(delay.Seconds()), originalText)
-
-	cmd := exec.Command("sh", "-c", script)
+	cmd := exec.Command("./auto_clear.sh", fmt.Sprintf("%d", int(delay.Seconds())), originalText)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Start()
 }
